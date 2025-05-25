@@ -1,0 +1,79 @@
+services:
+  web:
+    build: .
+    command: /bin/bash /backend/entrypoint.dev.sh
+    ports:
+      - "8000:8000"
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_started
+      celery_worker:
+        condition: service_started
+    env_file:
+      - .env
+    volumes:
+      - .:/backend
+      - ./app/core/firebase-credentials.json:/backend/app/core/firebase-credentials.json:ro
+    develop:
+      watch:
+        - path: ./requirements.txt
+          action: rebuild
+        - path: .
+          target: /backend
+          action: sync
+          ignore:
+            - "*.pyc"
+            - "__pycache__"
+        - path: ./alembic
+          target: /backend/alembic
+          action: sync
+          ignore:
+            - "*.pyc"
+            - "__pycache__"
+
+  celery_worker:
+    build: .
+    command: celery -A app.celery_app worker -Q notifications -l info
+    env_file:
+      - .env
+    volumes:
+      - .:/backend
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_started
+
+  redis:
+    image: redis:7-alpine
+    ports:
+      - "6379:6379"
+    volumes:
+      - redis_data:/data
+    command: >
+      --requirepass ${REDIS_PASSWORD}
+      --save 60 1
+      --loglevel warning
+      --maxmemory 256mb
+      --maxmemory-policy allkeys-lru
+    restart: unless-stopped
+
+  postgres:
+    image: postgres:15
+    ports:
+      - "5432:5432"
+    env_file:
+      - .env
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER}"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+
+volumes:
+  postgres_data:
+  redis_data:
